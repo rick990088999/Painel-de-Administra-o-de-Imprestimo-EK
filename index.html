@@ -1,0 +1,206 @@
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Controle de Empréstimos</title>
+<style>
+:root{--bg:#101214;--c:#1b1e22;--b:#2a2e34;--t:#e8eaed;--m:#8b93a0;--g:#3ecf8e;--r:#ef5350;--a:#4f8cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px system-ui,sans-serif;display:flex;min-height:100vh}
+nav{width:200px;background:#0b0c0e;padding:10px;position:sticky;top:0;height:100vh;overflow:auto;flex:none}
+nav b{display:block;margin:6px 8px 14px}nav a{display:block;padding:9px 10px;border-radius:8px;color:var(--m);cursor:pointer}nav a.on,nav a:hover{background:var(--c);color:var(--t)}
+main{flex:1;padding:18px;min-width:0}h2{margin:0 0 14px}h3{margin:18px 0 8px}
+.gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.cd{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;margin-bottom:10px}.cd small{color:var(--m);display:block}.cd b{font-size:19px}
+.g{color:var(--g)}.r{color:var(--r)}.m{color:var(--m)}
+table{width:100%;border-collapse:collapse;background:var(--c);border-radius:10px}th,td{padding:7px 9px;border-bottom:1px solid var(--b);text-align:left;white-space:nowrap}th{color:var(--m);font-weight:500}
+.w{overflow-x:auto;margin-bottom:10px}
+input,select,textarea,button{background:#23272d;color:var(--t);border:1px solid var(--b);border-radius:7px;padding:8px;font:inherit;margin:2px 0}
+button{cursor:pointer;background:var(--a);border:0}button.s{background:#2f343b}button.d{background:var(--r)}
+.f{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.f label{display:block;font-size:12px;color:var(--m)}
+canvas{max-width:100%;border:1px solid var(--b)}
+@media(max-width:720px){body{flex-direction:column}nav{width:100%;height:auto;display:flex;overflow-x:auto;z-index:5;padding:6px}nav b{display:none}nav a{white-space:nowrap}}
+</style></head><body><nav id="n"><b>💼 Empréstimos</b></nav><main id="m"></main>
+<script>
+const K='celv2',AN={me:'Minha conta',fr:'Conta do amigo'},A=['me','fr'],VER='2.0';let T=0;
+const fresh=()=>({cfg:{rate:1875,fee:200,feeAcct:'me',neg:false,tz:'America/Fortaleza'},bal:{me:0,fr:0},clients:[],loans:[],pays:[],exts:[],ledger:[]});
+let S=JSON.parse(localStorage.getItem(K)||'null')||fresh();
+const save=()=>{if(!T)localStorage.setItem(K,JSON.stringify(S))};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const R=c=>(c/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const P=v=>{v=String(v).trim();if(!v)return 0;if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');const n=Math.round(parseFloat(v)*100);return isNaN(n)?0:n};
+const today=()=>new Date().toLocaleDateString('sv-SE',{timeZone:S.cfg.tz});
+const dayOf=ts=>new Date(ts).toLocaleDateString('sv-SE',{timeZone:S.cfg.tz});
+const D=i=>i?i.split('-').reverse().join('/'):'—';
+const DT=ts=>new Date(ts).toLocaleString('pt-BR',{timeZone:S.cfg.tz});
+const add=(i,n)=>{const d=new Date(i+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
+const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
+const cn=id=>(S.clients.find(c=>c.id==id)||{name:'?'}).name;
+const g=id=>document.getElementById(id).value;
+const lo=id=>S.loans.find(l=>l.id==id);
+// ===== núcleo financeiro (centavos inteiros) =====
+function L(a,type,amt,o={}){S.bal[a]+=amt;S.ledger.push({id:uid(),ts:new Date().toISOString(),acct:a,type,amt,before:S.bal[a]-amt,after:S.bal[a],...o})}
+const calc=a=>sum(S.ledger.filter(e=>e.acct==a),e=>e.amt);
+const tot=l=>l.p+l.i,rem=l=>tot(l)-l.pp-l.pi;
+function st(l){if(l.cx)return'Cancelado';if(rem(l)==0)return'Pago';if(l.due<today())return'Vencido';return l.pp+l.pi>0?'Parcialmente pago':'Em aberto'}
+function adj(a,op,v,why){if(!why)throw'Informe o motivo';if(v<0||(op!='set'&&v<=0))throw'Valor inválido';
+ if(op=='add')L(a,'Capital disponibilizado',v,{desc:why});
+ else if(op=='sub'){if(S.bal[a]<v&&!S.cfg.neg)throw'Saldo insuficiente';L(a,'Retirada manual',-v,{desc:why})}
+ else L(a,'Correção manual',v-S.bal[a],{desc:why});save()}
+function newLoan(cid,date,due,p,src,obs){if(!cid)throw'Selecione o cliente';if(p<=0)throw'Valor inválido';if(!date||!due)throw'Informe as datas';
+ if(src.me+src.fr!=p)throw'A soma das origens deve ser igual ao principal';
+ for(const a of A)if(src[a]>0&&S.bal[a]<src[a]&&!S.cfg.neg)throw'Saldo insuficiente: '+AN[a];
+ const l={id:uid(),cid,date,due,p,rate:S.cfg.rate,i:Math.round(p*S.cfg.rate/10000),src,ret:{me:0,fr:0},pp:0,pi:0,obs,cx:false};
+ S.loans.push(l);for(const a of A)if(src[a])L(a,'Empréstimo realizado',-src[a],{cid,lid:l.id,desc:'Principal emprestado'});save();return l}
+function split(l,amt){const rp=l.p-l.pp,ri=l.i-l.pi,t=rp+ri;let pp=amt==t?rp:Math.min(rp,Math.round(amt*rp/t)),pi=amt-pp;if(pi>ri){pi=ri;pp=amt-pi}
+ const np=l.pp+pp,cm=Math.round(np*l.src.me/l.p),im=Math.ceil(pi/2);
+ return{pp,pi,pr:{me:cm-l.ret.me,fr:(np-cm)-l.ret.fr},ji:{me:im,fr:pi-im}}}
+function pay(lid,amt,forma,obs,pid){const l=lo(lid);if(!l||l.cx)throw'Empréstimo inválido';if(amt<=0||amt>rem(l))throw'Valor inválido ou acima do saldo devedor';
+ if(pid&&S.pays.some(p=>p.id==pid))throw'Pagamento já registrado (duplicado)';
+ const s=split(l,amt),p={id:pid||uid(),ts:new Date().toISOString(),cid:l.cid,lid,amt,...s,forma,obs,rev:false};
+ l.pp+=s.pp;l.pi+=s.pi;l.ret.me+=s.pr.me;l.ret.fr+=s.pr.fr;S.pays.push(p);
+ for(const a of A){const o={cid:l.cid,lid,pid:p.id};if(s.pr[a])L(a,'Recuperação de principal',s.pr[a],{...o,desc:'Principal recuperado'});if(s.ji[a])L(a,'Juros recebidos',s.ji[a],{...o,desc:'Parte dos juros (50%)'})}
+ save();return p}
+function estorno(pid){const p=S.pays.find(x=>x.id==pid);if(!p||p.rev)throw'Pagamento já estornado';const l=lo(p.lid);
+ for(const a of A){const o={cid:p.cid,lid:p.lid,pid,ref:pid};if(p.pr[a])L(a,'Estorno',-p.pr[a],{...o,desc:'Estorno de principal'});if(p.ji[a])L(a,'Estorno',-p.ji[a],{...o,desc:'Estorno de juros'})}
+ l.pp-=p.pp;l.pi-=p.pi;l.ret.me-=p.pr.me;l.ret.fr-=p.pr.fr;p.rev=true;save()}
+function cancelLoan(id){const l=lo(id);if(l.cx)throw'Já cancelado';if(l.pp+l.pi>0)throw'Estorne os pagamentos antes de cancelar';
+ for(const a of A)if(l.src[a])L(a,'Estorno',l.src[a],{cid:l.cid,lid:id,desc:'Cancelamento: capital devolvido'});l.cx=true;save()}
+function reqExt(lid,nw){const l=lo(lid);if(!l||l.cx||rem(l)==0)throw'Empréstimo inválido';if(!nw||nw<=l.due)throw'Novo vencimento deve ser posterior';
+ S.exts.push({id:uid(),lid,old:l.due,nw,req:today(),conf:null,fee:0,st:'Solicitada',fs:'—',paid:null,acct:null});save()}
+function confExt(id){const e=S.exts.find(x=>x.id==id);if(e.st!='Solicitada')throw'Já processada';e.st='Confirmada';e.conf=today();e.fee=S.cfg.fee;e.fs='Pendente';e.acct=S.cfg.feeAcct;lo(e.lid).due=e.nw;save()}
+function feeSet(id,fs){const e=S.exts.find(x=>x.id==id),l=lo(e.lid),o={cid:l.cid,lid:l.id};
+ if(fs=='Paga'&&e.fs=='Pendente'){L(e.acct,'Taxa de prorrogação recebida',e.fee,{...o,desc:'Taxa de prorrogação'});e.paid=today()}
+ else if(fs=='Estornada'&&e.fs=='Paga')L(e.acct,'Estorno',-e.fee,{...o,desc:'Estorno da taxa de prorrogação'});
+ else if(fs=='Cancelada'&&e.fs=='Pendente'){}else throw'Transição inválida';e.fs=fs;save()}
+function valid(o){try{if(!o||!o.cfg||!o.bal)return'Arquivo inválido';for(const k of['clients','loans','pays','exts','ledger'])if(!Array.isArray(o[k]))return'Falta lista: '+k;
+ const C=new Set(o.clients.map(c=>c.id)),Ls=new Set(o.loans.map(l=>l.id));
+ for(const l of o.loans){if(!C.has(l.cid))return'Empréstimo com cliente inexistente';if(![l.p,l.i,l.pp,l.pi].every(Number.isInteger))return'Valores não inteiros'}
+ for(const p of o.pays)if(!Ls.has(p.lid))return'Pagamento sem empréstimo';
+ for(const a of A){if(!Number.isInteger(o.bal[a]))return'Saldo inválido';if(o.ledger.filter(e=>e.acct==a).reduce((s,e)=>s+e.amt,0)!=o.bal[a])return'Saldo diverge do livro-caixa'}return''}catch(e){return'Arquivo inválido'}}
+function stats(f,t,cid){const ir=ts=>{const d=dayOf(ts);return d>=f&&d<=t},ok=x=>!cid||x.cid==cid;
+ const ls=S.loans.filter(l=>!l.cx&&l.date>=f&&l.date<=t&&ok(l)),ps=S.pays.filter(p=>!p.rev&&ir(p.ts)&&ok(p)),
+ es=S.exts.filter(e=>e.st=='Confirmada'&&e.conf>=f&&e.conf<=t&&ok(lo(e.lid))),er=S.exts.filter(e=>e.fs=='Paga'&&e.paid>=f&&e.paid<=t&&ok(lo(e.lid)));
+ return{ls,ps,es,er,lent:sum(ls,l=>l.p),rec:sum(ps,p=>p.pp),int:sum(ps,p=>p.pi),im:sum(ps,p=>p.ji.me),if:sum(ps,p=>p.ji.fr),feeG:sum(es,e=>e.fee),feeR:sum(er,e=>e.fee),all:sum(ps,p=>p.amt)}}
+const openL=()=>S.loans.filter(l=>!l.cx&&rem(l)>0);
+// ===== UI =====
+const PG=[['dash','Dashboard'],['cli','Clientes'],['emp','Empréstimos'],['pag','Pagamentos'],['ctas','Contas e capital'],['pro','Prorrogações'],['liv','Livro-caixa'],['rel','Relatórios'],['res','Resumo semanal'],['cfg','Configurações']];
+let cur='dash',arg=null,Q='',QS='',PID=uid(),RF='',RT='',RC='',LA='',LT='',RP='cur',RM='simple',RD1='',RD2='';
+const ok=f=>{try{f();go()}catch(e){alert(e.message||e)}};
+const cd=(t,v,c='')=>`<div class="cd"><small>${t}</small><b class="${c}">${v}</b></div>`;
+const tb=(h,r)=>`<div class="w"><table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${r.map(x=>`<tr>${x.map(y=>`<td>${y}</td>`).join('')}</tr>`).join('')||`<tr><td class="m" colspan="${h.length}">Nada registrado.</td></tr>`}</table></div>`;
+const opts=(a,sel)=>a.map(([v,t])=>`<option value="${v}" ${v==sel?'selected':''}>${t}</option>`).join('');
+const cOpts=(all)=>opts((all?[['','Todos']]:[]).concat(S.clients.filter(c=>c.active||all).map(c=>[c.id,c.name])));
+const lOpts=ls=>opts(ls.map(l=>[l.id,`${cn(l.cid)} • ${R(l.p)} • resta ${R(rem(l))}`]));
+const bt=(t,f,c='s')=>`<button class="${c}" onclick="${f}">${t}</button>`;
+function go(p,a){if(p){cur=p;arg=a}$('#m').innerHTML=V[cur](arg);$('#n').innerHTML='<b>💼 Empréstimos</b>'+PG.map(([k,t])=>`<a class="${k==cur?'on':''}" onclick="go('${k}')">${t}</a>`).join('');if(cur=='res')drawRes();scrollTo(0,0)}
+const $=s=>document.querySelector(s);
+const V={
+dash(){const op=openL(),ov=op.filter(l=>l.due<today()),pe=sum(op,rem),bad=A.filter(a=>S.bal[a]!=calc(a));
+ const lent=a=>sum(op,l=>l.src[a]-l.ret[a]),pi=a=>sum(S.pays.filter(p=>!p.rev),p=>p.ji[a]);
+ return`<h2>Dashboard</h2>${bad.length?`<div class="cd r">⚠ Saldo armazenado diverge do livro-caixa em: ${bad.map(a=>AN[a]).join(', ')}</div>`:''}
+ ${bt('Editar saldo da conta',"go('ctas')",'')}<div class="gr" style="margin-top:10px">
+ ${cd('Meu saldo disponível',R(S.bal.me),'g')}${cd('Saldo do amigo',R(S.bal.fr),'g')}${cd('Total para novos empréstimos',R(S.bal.me+S.bal.fr))}
+ ${cd('Principal emprestado',R(lent('me')+lent('fr')))}${cd('Juros recebidos',R(pi('me')+pi('fr')))}${cd('Minha parte dos juros',R(pi('me')))}${cd('Parte do amigo',R(pi('fr')))}
+ ${cd('Pagamentos pendentes',R(pe),'r')}${cd('Clientes devedores',new Set(op.map(l=>l.cid)).size)}${cd('Empréstimos vencidos',ov.length,ov.length?'r':'')}
+ ${cd('Taxas de prorrogação pendentes',R(sum(S.exts.filter(e=>e.fs=='Pendente'),e=>e.fee)))}</div>
+ <h3>Próximos vencimentos</h3>${tb(['Cliente','Vence','Resta'],op.sort((a,b)=>a.due>b.due?1:-1).slice(0,6).map(l=>[cn(l.cid),`<span class="${l.due<today()?'r':''}">${D(l.due)}</span>`,R(rem(l))]))}
+ <h3>Últimas movimentações</h3>${ledT(S.ledger.slice(-8).reverse())}`},
+cli(id){if(id){const c=S.clients.find(x=>x.id==id),ls=S.loans.filter(l=>l.cid==id&&!l.cx),ps=S.pays.filter(p=>p.cid==id&&!p.rev);
+ return`<h2>${c.name}</h2>${bt('← Voltar',"go('cli')")}<div class="gr" style="margin-top:10px">${cd('Total emprestado',R(sum(ls,l=>l.p)))}${cd('Principal pendente',R(sum(ls,l=>l.p-l.pp)))}${cd('Juros pendentes',R(sum(ls,l=>l.i-l.pi)),'r')}${cd('Total pago',R(sum(ps,p=>p.amt)),'g')}${cd('Juros pagos',R(sum(ps,p=>p.pi)))}</div>
+ <p class="m">Tel: ${c.tel||'—'} • Pix: ${c.pix||'—'} • Cadastro: ${D(c.date)} • ${c.obs||''}</p><h3>Empréstimos</h3>${tb(['Data','Principal','Total','Resta','Vence','Situação',''],ls.map(l=>[D(l.date),R(l.p),R(tot(l)),R(rem(l)),D(l.due),st(l),bt('Abrir',`go('emp','${l.id}')`)]))}
+ <h3>Pagamentos</h3>${tb(['Data','Valor','Principal','Juros'],ps.map(p=>[DT(p.ts),R(p.amt),R(p.pp),R(p.pi)]))}
+ <h3>Prorrogações</h3>${tb(['Antes','Novo','Taxa','Situação'],S.exts.filter(e=>lo(e.lid).cid==id).map(e=>[D(e.old),D(e.nw),R(e.fee),e.st+' / '+e.fs]))}`}
+ const cs=S.clients.filter(c=>(!Q||c.name.toLowerCase().includes(Q.toLowerCase()))&&(!QS||(QS=='a')==c.active));
+ return`<h2>Clientes</h2><div class="cd f"><div><label>Nome</label><input id="cn"></div><div><label>Telefone</label><input id="ct"></div><div><label>Pix</label><input id="cp"></div><div><label>Observações</label><input id="co"></div>${bt('Cadastrar',"ok(()=>{if(!g('cn').trim())throw'Informe o nome';S.clients.push({id:uid(),name:g('cn').trim(),tel:g('ct'),pix:g('cp'),obs:g('co'),date:today(),active:true});save()})",'')}</div>
+ <div class="f"><input placeholder="Pesquisar" value="${Q}" onchange="Q=this.value;go()"><select onchange="QS=this.value;go()">${opts([['','Todos'],['a','Ativos'],['i','Arquivados']],QS)}</select></div>
+ ${tb(['Nome','Saldo devedor','Emprestado','Situação',''],cs.map(c=>{const ls=S.loans.filter(l=>l.cid==c.id&&!l.cx);return[`<a style="cursor:pointer;color:var(--a)" onclick="go('cli','${c.id}')">${c.name}</a>`,R(sum(ls,rem)),R(sum(ls,l=>l.p)),c.active?'Ativo':'Arquivado',bt('Editar',`ok(()=>editC('${c.id}'))`)+bt(c.active?'Arquivar':'Reativar',`ok(()=>{S.clients.find(x=>x.id=='${c.id}').active=${!c.active};save()})`)+bt('Excluir',`ok(()=>delC('${c.id}'))`,'d')]}))}`},
+emp(id){if(id){const l=lo(id),ps=S.pays.filter(p=>p.lid==id);
+ return`<h2>Empréstimo — ${cn(l.cid)}</h2>${bt('← Voltar',"go('emp')")}<div class="gr" style="margin-top:10px">${cd('Principal',R(l.p))}${cd('Juros ('+(l.rate/100)+'%)',R(l.i))}${cd('Total',R(tot(l)))}${cd('Resta',R(rem(l)),'r')}${cd('Situação',st(l))}${cd('Vence',D(l.due))}</div>
+ <p>Origem do capital: ${A.map(a=>`${AN[a]} ${R(l.src[a])} (recuperado ${R(l.ret[a])})`).join(' • ')}</p><p class="m">${l.obs||''}</p>
+ ${l.cx?'':bt('Cancelar empréstimo',`if(confirm('Cancelar e devolver o capital?'))ok(()=>cancelLoan('${id}'))`,'d')}<h3>Pagamentos</h3>${tb(['Data','Valor','Principal','Juros','Forma',''],ps.map(p=>[DT(p.ts),R(p.amt),R(p.pp),R(p.pi),p.forma,p.rev?'<span class="r">estornado</span>':bt('Estornar',`if(confirm('Estornar pagamento?'))ok(()=>estorno('${p.id}'))`,'d')]))}`}
+ const ls=S.loans.filter(l=>!QS||st(l)==QS);
+ return`<h2>Empréstimos</h2><div class="cd"><div class="f"><div><label>Cliente</label><select id="lc" onchange="pv()">${cOpts()}</select></div><div><label>Data</label><input id="ld" type="date" value="${today()}"></div><div><label>Vencimento</label><input id="lv" type="date" value="${add(today(),30)}"></div><div><label>Principal (R$)</label><input id="lp" oninput="pv()"></div>
+ <div><label>Origem</label><select id="lo" onchange="pv()">${opts([['me','Minha conta'],['fr','Conta do amigo'],['sp','Dividir']])}</select></div><div><label>Minha parte</label><input id="sm" oninput="pv()"></div><div><label>Parte do amigo</label><input id="sf" oninput="pv()"></div></div>
+ <div class="f"><div><label>Observações</label><input id="lb"></div></div><div id="pv" class="m" style="margin:8px 0"></div>${bt('Confirmar empréstimo',"ok(()=>{const s=src();if(!confirm(pvT()))return;newLoan(g('lc'),g('ld'),g('lv'),P(g('lp')),s,g('lb'))})",'')}</div>
+ <div class="f"><select onchange="QS=this.value;go()">${opts([['','Todas'],['Em aberto','Em aberto'],['Parcialmente pago','Parcial'],['Pago','Pago'],['Vencido','Vencido'],['Cancelado','Cancelado']],QS)}</select></div>
+ ${tb(['Cliente','Data','Principal','Resta','Vence','Situação',''],ls.map(l=>[cn(l.cid),D(l.date),R(l.p),R(rem(l)),D(l.due),st(l),bt('Abrir',`go('emp','${l.id}')`)]))}`},
+pag(){const ls=openL();return`<h2>Pagamentos</h2><div class="cd f"><div><label>Empréstimo</label><select id="pl" onchange="pp()">${lOpts(ls)}</select></div><div><label>Valor (R$)</label><input id="pa" oninput="pp()"></div><div><label>Forma</label><select id="pf">${opts(['Pix','Dinheiro','Transferência','Outro'].map(x=>[x,x]))}</select></div><div><label>Obs.</label><input id="po"></div></div>
+ <div id="pp" class="m" style="margin:8px 0">Selecione o empréstimo e informe o valor.</div>${bt('Registrar pagamento',"ok(()=>{const l=lo(g('pl'));if(!l)throw'Sem empréstimo';const a=P(g('pa'));if(!confirm('Confirmar recebimento de '+R(a)+'?\\n'+ppT(l,a)))return;const p=pay(l.id,a,g('pf'),g('po'),PID);PID=uid();alert('Registrado: '+R(p.amt)+' (principal '+R(p.pp)+', juros '+R(p.pi)+')')})",'')}
+ <h3>Histórico</h3>${tb(['Data','Cliente','Valor','Principal','Juros (eu/amigo)','Forma',''],S.pays.slice().reverse().map(p=>[DT(p.ts),cn(p.cid),R(p.amt),R(p.pp),R(p.ji.me)+' / '+R(p.ji.fr),p.forma,p.rev?'<span class="r">estornado</span>':bt('Estornar',`if(confirm('Estornar?'))ok(()=>estorno('${p.id}'))`,'d')]))}`},
+ctas(){const op=openL();return`<h2>Contas e capital</h2><div class="gr">${A.map(a=>{const e=S.ledger.filter(x=>x.acct==a);return`<div class="cd"><b>${AN[a]}</b><br>Disponível: <b class="g">${R(S.bal[a])}</b><br>Emprestado: ${R(sum(op,l=>l.src[a]-l.ret[a]))}<br>Juros recebidos: ${R(sum(S.pays.filter(p=>!p.rev),p=>p.ji[a]))}<br>Aportes: ${R(sum(e.filter(x=>x.type=='Capital disponibilizado'),x=>x.amt))}<br>Retiradas: ${R(-sum(e.filter(x=>x.type=='Retirada manual'),x=>x.amt))}</div>`}).join('')}</div>
+ <h3>Editar saldo da conta</h3><div class="cd f"><div><label>Conta</label><select id="aa" onchange="ap()">${opts(A.map(a=>[a,AN[a]]))}</select></div><div><label>Operação</label><select id="ao" onchange="ap()">${opts([['add','Adicionar dinheiro'],['sub','Retirar dinheiro'],['set','Definir/ajustar saldo para']])}</select></div><div><label>Valor</label><input id="av" oninput="ap()"></div><div><label>Motivo</label><input id="ar"></div></div><div id="ap" class="m" style="margin:8px 0"></div>
+ ${bt('Confirmar',"ok(()=>{const a=g('aa'),o=g('ao'),v=P(g('av'));if(!confirm(AN[a]+': '+R(S.bal[a])+' → '+R(nb(a,o,v))))return;adj(a,o,v,g('ar').trim())})",'')}`},
+pro(){return`<h2>Prorrogações</h2><p class="m">Taxa de ${R(S.cfg.fee)} só é gerada na confirmação; vai para ${AN[S.cfg.feeAcct]}.</p><div class="cd f"><div><label>Empréstimo</label><select id="el">${lOpts(openL())}</select></div><div><label>Novo vencimento</label><input id="en" type="date"></div>${bt('Solicitar',"ok(()=>reqExt(g('el'),g('en')))",'')}</div>
+ ${tb(['Cliente','Antes','Novo','Taxa','Prorrogação','Taxa situação','Ações'],S.exts.map(e=>[cn(lo(e.lid).cid),D(e.old),D(e.nw),R(e.fee),e.st,e.fs,(e.st=='Solicitada'?bt('Confirmar',`if(confirm('Confirmar prorrogação e gerar taxa?'))ok(()=>confExt('${e.id}'))`):'')+(e.fs=='Pendente'?bt('Marcar paga',`ok(()=>feeSet('${e.id}','Paga'))`)+bt('Cancelar taxa',`ok(()=>feeSet('${e.id}','Cancelada'))`):'')+(e.fs=='Paga'?bt('Estornar',`ok(()=>feeSet('${e.id}','Estornada'))`,'d'):'')]))}`},
+liv(){const e=S.ledger.filter(x=>(!LA||x.acct==LA)&&(!LT||x.type==LT)).reverse(),ty=[...new Set(S.ledger.map(x=>x.type))];
+ return`<h2>Livro-caixa</h2><div class="f"><select onchange="LA=this.value;go()">${opts([['','Todas as contas']].concat(A.map(a=>[a,AN[a]])),LA)}</select><select onchange="LT=this.value;go()">${opts([['','Todos os tipos']].concat(ty.map(t=>[t,t])),LT)}</select></div>${ledT(e)}`},
+rel(){RF=RF||today().slice(0,8)+'01';RT=RT||today();const s=stats(RF,RT,RC),op=openL();
+ return`<h2>Relatórios</h2><div class="f"><div><label>De</label><input type="date" value="${RF}" onchange="RF=this.value;go()"></div><div><label>Até</label><input type="date" value="${RT}" onchange="RT=this.value;go()"></div><div><label>Cliente</label><select onchange="RC=this.value;go()">${cOpts(1).replace(`value="${RC}"`,`value="${RC}" selected`)}</select></div>${bt('Semana atual',"RF=wk()[0];RT=wk()[1];go()")}${bt('Mês',"RF=today().slice(0,8)+'01';RT=today();go()")}${bt('Ano',"RF=today().slice(0,5)+'01-01';RT=today();go()")}</div><div class="gr" style="margin-top:10px">
+ ${cd('Principal emprestado',R(s.lent))}${cd('Principal recuperado',R(s.rec))}${cd('Juros recebidos',R(s.int),'g')}${cd('Minha parte',R(s.im))}${cd('Parte do amigo',R(s.if))}${cd('Taxas geradas',R(s.feeG))}${cd('Taxas recebidas',R(s.feeR))}${cd('Total de pagamentos',R(s.all))}
+ ${cd('Retiradas',R(-sum(S.ledger.filter(e=>e.type=='Retirada manual'&&dayOf(e.ts)>=RF&&dayOf(e.ts)<=RT),e=>e.amt)))}${cd('Aportes',R(sum(S.ledger.filter(e=>e.type=='Capital disponibilizado'&&dayOf(e.ts)>=RF&&dayOf(e.ts)<=RT),e=>e.amt)))}${cd('Capital emprestado agora',R(sum(op,l=>l.p-l.pp)))}${cd('Dívidas pendentes',R(sum(op,rem)),'r')}${cd('Vencidos',op.filter(l=>l.due<today()).length)}</div>
+ <p class="m">Saldos atuais: ${A.map(a=>AN[a]+' '+R(S.bal[a])).join(' • ')}</p>`},
+res(){const w=wk(),pw=[add(w[0],-7),add(w[1],-7)];RD1=RD1||w[0];RD2=RD2||w[1];
+ return`<h2>Resumo semanal</h2><div class="f"><select onchange="RP=this.value;go()">${opts([['cur','Semana atual'],['prev','Semana anterior'],['cus','Personalizado']],RP)}</select>${RP=='cus'?`<input type="date" value="${RD1}" onchange="RD1=this.value;go()"><input type="date" value="${RD2}" onchange="RD2=this.value;go()">`:''}<select onchange="RM=this.value;go()">${opts([['simple','Resumo simples'],['det','Relatório detalhado']],RM)}</select>${bt('Baixar PNG',"dl()",'')}${bt('Compartilhar',"sh()")}${bt('WhatsApp',"window.open('https://wa.me/?text='+encodeURIComponent('Resumo financeiro semanal (anexe a imagem baixada)'))")}</div><p class="m">Prévia (não inclui Pix nem telefones). Se o compartilhamento direto falhar, baixe e anexe manualmente.</p><canvas id="cv"></canvas>`},
+cfg(){return`<h2>Configurações</h2><div class="cd f"><div><label>Juros padrão (%)</label><input id="cr" value="${S.cfg.rate/100}"></div><div><label>Taxa de prorrogação (R$)</label><input id="cf" value="${S.cfg.fee/100}"></div><div><label>Conta da taxa</label><select id="ca">${opts(A.map(a=>[a,AN[a]]),S.cfg.feeAcct)}</select></div><div><label>Saldo negativo</label><select id="cg">${opts([['0','Bloqueado'],['1','Permitido']],S.cfg.neg?'1':'0')}</select></div>${bt('Salvar',"ok(()=>{const r=Math.round(parseFloat(g('cr').replace(',','.'))*100);if(!(r>=0))throw'Taxa inválida';S.cfg.rate=r;S.cfg.fee=P(g('cf'));S.cfg.feeAcct=g('ca');S.cfg.neg=g('cg')=='1';save();alert('Salvo (não altera registros antigos)')})",'')}</div>
+ <p class="m">Juros: divisão 50/50 (centavo ímpar para mim) • Moeda R$ • Fuso America/Fortaleza • Versão ${VER}</p>
+ <div class="f">${bt('Backup JSON',"bk()",'')}<input type="file" id="rf" accept=".json" onchange="rs(this.files[0])">${['clients','loans','pays','exts','ledger'].map(k=>bt('CSV '+k,`csv('${k}')`)).join('')}${bt('Executar testes',"alert(tests())")}</div>`}};
+const ledT=e=>tb(['Data','Conta','Tipo','Valor','Antes','Depois','Cliente','Descrição'],e.map(x=>[DT(x.ts),AN[x.acct],x.type,`<span class="${x.amt<0?'r':'g'}">${R(x.amt)}</span>`,R(x.before),R(x.after),x.cid?cn(x.cid):'',x.desc||'']));
+const wk=()=>{const d=new Date(today()+'T12:00:00Z'),s=add(today(),-((d.getUTCDay()+6)%7));return[s,add(s,6)]};
+function editC(id){const c=S.clients.find(x=>x.id==id),n=prompt('Nome',c.name);if(!n)return;c.name=n;c.tel=prompt('Telefone',c.tel)??c.tel;c.pix=prompt('Pix',c.pix)??c.pix;c.obs=prompt('Obs.',c.obs)??c.obs;save()}
+function delC(id){if(S.loans.some(l=>l.cid==id))throw'Cliente tem histórico financeiro: use Arquivar';if(!confirm('Excluir cliente?'))return;S.clients=S.clients.filter(c=>c.id!=id);save()}
+function src(){const p=P(g('lp')),o=g('lo');return o=='me'?{me:p,fr:0}:o=='fr'?{me:0,fr:p}:{me:P(g('sm')),fr:P(g('sf'))}}
+function pvT(){const s=src(),p=P(g('lp')),i=Math.round(p*S.cfg.rate/10000);return`Principal ${R(p)} + juros ${R(i)} = ${R(p+i)}. Vence ${D(g('lv'))}.\n`+A.filter(a=>s[a]).map(a=>`${AN[a]}: ${R(S.bal[a])} → ${R(S.bal[a]-s[a])}`).join('\n')}
+function pv(){$('#pv').innerText=pvT()}
+function ppT(l,a){if(!l||a<=0||a>rem(l))return'Valor inválido';const s=split(l,a);return`Principal ${R(s.pp)} • Juros ${R(s.pi)} (eu ${R(s.ji.me)} / amigo ${R(s.ji.fr)})\nPrincipal volta: eu ${R(s.pr.me)} / amigo ${R(s.pr.fr)}`}
+function pp(){$('#pp').innerText=ppT(lo(g('pl')),P(g('pa')))}
+const nb=(a,o,v)=>o=='add'?S.bal[a]+v:o=='sub'?S.bal[a]-v:v;
+function ap(){const a=g('aa');$('#ap').innerText=`Saldo anterior ${R(S.bal[a])} → posterior ${R(nb(a,g('ao'),P(g('av'))))}`}
+// resumo em imagem
+function drawRes(){const w=wk();let f,t;if(RP=='cur')[f,t]=w;else if(RP=='prev')[f,t]=[add(w[0],-7),add(w[1],-7)];else[f,t]=[RD1,RD2];
+ const s=stats(f,t),det=RM=='det',op=openL(),it=[];
+ it.push(['t','Resumo financeiro semanal'],['s','Período: '+D(f)+' a '+D(t)+' • Gerado em '+DT(new Date())],['h','Movimentações da semana']);
+ [['Principal emprestado',R(s.lent)],['Principal recuperado',R(s.rec)],['Juros efetivamente recebidos',R(s.int)],['Minha parte dos juros',R(s.im)],['Parte do amigo',R(s.if)],['Taxas de prorrogação recebidas',R(s.feeR)],['Empréstimos realizados',s.ls.length],['Pagamentos recebidos',s.ps.length],['Prorrogações confirmadas',s.es.length]].forEach(x=>it.push(['k',...x]));
+ it.push(['h','Saldos atuais'],['k','Minha conta',R(S.bal.me)],['k','Conta do amigo',R(S.bal.fr)]);
+ if(det){it.push(['h','Por cliente'],['r',['Cliente','Emp.','Pag.','Princ.','Juros','Taxas','Deve'],1]);
+  S.clients.forEach(c=>{const x=stats(f,t,c.id),d=sum(S.loans.filter(l=>l.cid==c.id&&!l.cx),rem);if(x.ls.length||x.ps.length||x.er.length||d)it.push(['r',[c.name,x.ls.length,x.ps.length,R(x.rec),R(x.int),R(x.feeR),R(d)]])});
+  it.push(['h','Pagamentos do período'],['r',['Data','Cliente','Valor','Princ./Juros','Juros eu/amigo','Forma'],1]);
+  s.ps.forEach(p=>it.push(['r',[D(dayOf(p.ts)),cn(p.cid),R(p.amt),R(p.pp)+'/'+R(p.pi),R(p.ji.me)+'/'+R(p.ji.fr),p.forma]]));
+  it.push(['h','Pendências atuais (não são da semana)'],['k','Dívidas em aberto',R(sum(op,rem))],['k','Taxas de prorrogação pendentes',R(sum(S.exts.filter(e=>e.fs=='Pendente'),e=>e.fee))])}
+ else it.push(['h','Pendências atuais'],['k','Dívidas em aberto',R(sum(op,rem))]);
+ const hh={t:56,s:30,h:50,k:34,r:32},cv=$('#cv'),W=900;cv.width=W;cv.height=40+sum(it,x=>hh[x[0]])+20;const c=cv.getContext('2d');
+ c.fillStyle='#14171a';c.fillRect(0,0,W,cv.height);let y=30;const cut=(s,w)=>{s=String(s);while(c.measureText(s).width>w&&s.length>1)s=s.slice(0,-2)+'…';return s};
+ for(const x of it){const k=x[0];y+=hh[k];c.textAlign='left';
+  if(k=='t'){c.fillStyle='#fff';c.font='bold 30px sans-serif';c.fillText(x[1],30,y-12)}
+  else if(k=='s'){c.fillStyle='#8b93a0';c.font='15px sans-serif';c.fillText(cut(x[1],840),30,y-8)}
+  else if(k=='h'){c.fillStyle='#4f8cff';c.font='bold 20px sans-serif';c.fillText(x[1],30,y-10)}
+  else if(k=='k'){c.fillStyle='#cfd3d9';c.font='17px sans-serif';c.fillText(x[1],30,y-10);c.textAlign='right';c.fillStyle='#3ecf8e';c.font='bold 17px sans-serif';c.fillText(String(x[2]),W-30,y-10)}
+  else{const n=x[1].length,cw=840/n;c.font=(x[2]?'bold ':'')+'14px sans-serif';c.fillStyle=x[2]?'#8b93a0':'#e8eaed';x[1].forEach((v,i)=>c.fillText(cut(v,cw-8),30+i*cw,y-10))}}}
+function blob(){return new Promise(r=>$('#cv').toBlob(r,'image/png'))}
+async function dl(){const a=document.createElement('a');a.href=URL.createObjectURL(await blob());a.download='resumo-semanal.png';a.click()}
+async function sh(){const f=new File([await blob()],'resumo-semanal.png',{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f],title:'Resumo financeiro semanal'}).catch(()=>{});else{alert('Compartilhamento direto indisponível: baixando a imagem.');dl()}}
+// backup / csv
+function bk(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='backup-emprestimos-'+today()+'.json';a.click()}
+function rs(f){if(!f)return;f.text().then(t=>{try{const o=JSON.parse(t),e=valid(o);if(e)return alert('Backup recusado: '+e);if(!confirm('Substituir TODOS os dados atuais? Um backup dos dados atuais será baixado antes.'))return;bk();S=o;save();go()}catch(x){alert('Arquivo inválido')}})}
+function csv(k){const r=S[k];if(!r.length)return alert('Sem dados');const h=Object.keys(r[0]),q=v=>'"'+(typeof v=='object'?JSON.stringify(v):String(v??'')).replace(/"/g,'""')+'"';
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+h.join(';')+'\n'+r.map(x=>h.map(c=>q(x[c])).join(';')).join('\n')],{type:'text/csv'}));a.download=k+'.csv';a.click()}
+// testes
+function tests(){const bkS=S;T=1;const out=[];const mk=()=>{S=fresh();adj('me','add',50000,'t');adj('fr','add',30000,'t');S.clients.push({id:'c',name:'A',active:true})};
+ const t=(n,f)=>{try{mk();out.push((f()?'✔ ':'✘ ')+n)}catch(e){out.push('✘ '+n+' ('+(e.message||e)+')')}};
+ const ln=(p,s)=>newLoan('c','2026-01-01','2026-02-01',p,s||{me:p,fr:0},'');
+ t('Cadastro de cliente',()=>S.clients.length==1);
+ t('Empréstimo de uma conta + desconto do principal',()=>{ln(10000);return S.bal.me==40000&&S.bal.fr==30000});
+ t('Empréstimo dividido 60/40',()=>{ln(10000,{me:6000,fr:4000});return S.bal.me==44000&&S.bal.fr==26000});
+ t('Juros 18,75% e total 118,75',()=>{const l=ln(10000);return l.i==1875&&tot(l)==11875});
+ t('Pagamento integral: principal volta e 938/937',()=>{const l=ln(10000);pay(l.id,11875,'Pix','');return S.bal.me==50000+938&&S.bal.fr==30000+937&&st(l)=='Pago'});
+ t('Integral com origem dividida',()=>{const l=ln(10000,{me:6000,fr:4000});pay(l.id,11875,'Pix','');return S.bal.me==50000+938&&S.bal.fr==30000+937});
+ t('Parcial R$50: sem devolver todo o principal',()=>{const l=ln(10000);const p=pay(l.id,5000,'Pix','');return p.pp+p.pi==5000&&p.pp<10000&&p.pp==4211&&p.pi==789&&st(l)=='Parcialmente pago'});
+ t('Parcial: principal proporcional às contas',()=>{const l=ln(10000,{me:6000,fr:4000});const p=pay(l.id,5000,'Pix','');return p.pr.me+p.pr.fr==p.pp&&Math.abs(p.pr.me-Math.round(p.pp*.6))<=1});
+ t('Parciais somam exato no fim',()=>{const l=ln(10000,{me:3333,fr:6667});pay(l.id,3000,'Pix','');pay(l.id,4000,'Pix','');pay(l.id,rem(l),'Pix','');return rem(l)==0&&l.ret.me==3333&&l.ret.fr==6667&&S.bal.me+S.bal.fr==80000+1875});
+ t('Prorrogação: sem taxa antes de confirmar',()=>{const l=ln(10000);reqExt(l.id,'2026-03-01');return S.exts[0].fee==0&&S.exts[0].fs=='—'});
+ t('Prorrogação confirmada e taxa recebida',()=>{const l=ln(10000);reqExt(l.id,'2026-03-01');confExt(S.exts[0].id);const b=S.bal.me;feeSet(S.exts[0].id,'Paga');return S.exts[0].fee==200&&S.bal.me==b+200&&l.due=='2026-03-01'});
+ t('Retirada e adição manual',()=>{adj('me','sub',1000,'x');adj('fr','add',500,'y');return S.bal.me==49000&&S.bal.fr==30500});
+ t('Cancelamento devolve capital',()=>{const l=ln(10000,{me:6000,fr:4000});cancelLoan(l.id);return S.bal.me==50000&&S.bal.fr==30000});
+ t('Estorno sem duplicidade',()=>{const l=ln(10000);const p=pay(l.id,11875,'Pix','');estorno(p.id);let d=0;try{estorno(p.id)}catch(e){d=1}return d&&S.bal.me==40000&&rem(l)==11875});
+ t('Pagamento duplicado bloqueado',()=>{const l=ln(10000);pay(l.id,1000,'Pix','','X');let d=0;try{pay(l.id,1000,'Pix','','X')}catch(e){d=1}return d});
+ t('Empréstimo acima do saldo bloqueado',()=>{try{ln(60000);return false}catch(e){return true}});
+ t('Saldo == livro-caixa',()=>{const l=ln(10000);pay(l.id,3000,'Pix','');return A.every(a=>S.bal[a]==calc(a))});
+ t('Backup: validação e persistência (JSON)',()=>{const l=ln(10000);pay(l.id,3000,'Pix','');const o=JSON.parse(JSON.stringify(S));return valid(o)==''&&valid({...o,bal:{me:1,fr:1}})!=''});
+ T=0;S=bkS;return out.join('\n')}
+go('dash');
+</script></body></html>
